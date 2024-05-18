@@ -202,7 +202,7 @@ int main(void)
         int width = 30;
         int height = 20;
 
-        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::FitComponent();
+        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::Fullscreen();
 
         ftxui::WindowOptions binaries_win_options;
         binaries_win_options.inner = cli::BinariesWindow();

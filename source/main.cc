@@ -1,10 +1,10 @@
-#include <array>
-#include <cstdlib>
-
 #include <filesystem>
-#include <iostream>
+#include <map>
 #include <string>
 #include <vector>
+
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
 
 namespace details
 {
@@ -96,8 +96,87 @@ std::vector<std::string> BinariesList()
 
 } // namespace details
 
+namespace cli
+{
+class FileList final : public ftxui::ComponentBase {
+    public:
+        FileList(std::vector<std::string>&& file_list);
+
+    private:
+        void configure(std::vector<std::string>&& file_list);
+        void generateView();
+
+        std::map<std::string, bool> list_;
+};
+
+FileList::FileList(std::vector<std::string>&& file_list)
+{
+        configure(std::move(file_list));
+        generateView();
+}
+
+void FileList::configure(std::vector<std::string>&& file_list)
+{
+        for (std::string file : file_list) {
+                list_[std::move(file)] = false;
+        }
+}
+void FileList::generateView()
+{
+        ftxui::Components components;
+
+        for (auto& [key, value] : this->list_) {
+                std::string const filename = *std::prev(std::filesystem::path(key).end(), 1);
+                components.emplace_back(ftxui::Checkbox(filename, &value));
+        }
+
+        this->ComponentBase::Add(ftxui::Container::Vertical(std::move(components)));
+}
+
+ftxui::Component ManifestsWindow()
+{
+        return ftxui::Make<FileList>(details::ManifestsList());
+}
+ftxui::Component BinariesWindow()
+{
+        return ftxui::Make<FileList>(details::BinariesList());
+}
+
+} // namespace cli
+
 int main(void)
 {
-        std::vector<std::string> const manifests = details::ManifestsList();
-        std::vector<std::string> const binaries = details::BinariesList();
+        int width = 30;
+        int height = 65;
+
+        ftxui::WindowOptions binaries_win_options;
+        binaries_win_options.inner = cli::BinariesWindow();
+        binaries_win_options.title = "Binaries List";
+        binaries_win_options.width = &width;
+        binaries_win_options.height = &height;
+
+        ftxui::WindowOptions manifests_win_options;
+        manifests_win_options.inner = cli::ManifestsWindow();
+        manifests_win_options.title = "Manifests List";
+        manifests_win_options.width = &width;
+        manifests_win_options.height = &height;
+
+        ftxui::Component manifests_window = ftxui::Window(manifests_win_options);
+        ftxui::Component binaries_window = ftxui::Window(binaries_win_options);
+
+        ftxui::Component layout = ftxui::Container::Horizontal({
+                manifests_window,
+                binaries_window,
+        });
+        ftxui::Component component = ftxui::Renderer(layout, [&] {
+                return ftxui::hbox({
+                               manifests_window->Render(),
+                               binaries_window->Render(),
+                       }) |
+                       ftxui::xflex | ftxui::yflex | size(ftxui::WIDTH, ftxui::GREATER_THAN, 40) |
+                       ftxui::border;
+        });
+
+        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::Fullscreen();
+        screen.Loop(component);
 }

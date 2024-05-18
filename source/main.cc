@@ -147,7 +147,7 @@ ftxui::Component BinariesWindow()
 int main(void)
 {
         int width = 30;
-        int height = 65;
+        int height = 20;
 
         ftxui::WindowOptions binaries_win_options;
         binaries_win_options.inner = cli::BinariesWindow();
@@ -163,20 +163,21 @@ int main(void)
 
         ftxui::Component manifests_window = ftxui::Window(manifests_win_options);
         ftxui::Component binaries_window = ftxui::Window(binaries_win_options);
+        ftxui::Component done_button = ftxui::Button("Done", [] { std::exit(EXIT_SUCCESS); });
 
-        ftxui::Component layout = ftxui::Container::Horizontal({
-                manifests_window,
-                binaries_window,
-        });
-        ftxui::Component component = ftxui::Renderer(layout, [&] {
-                return ftxui::hbox({
-                               manifests_window->Render(),
-                               binaries_window->Render(),
-                       }) |
-                       ftxui::xflex | ftxui::yflex | size(ftxui::WIDTH, ftxui::GREATER_THAN, 40) |
-                       ftxui::border;
+        ftxui::Component layout = ftxui::Container::Vertical({
+                ftxui::Container::Horizontal({
+                        manifests_window,
+                        binaries_window,
+                }),
+                done_button,
         });
 
-        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::Fullscreen();
+        auto component = Renderer(layout, [&] {
+                return ftxui::vbox({ layout->Render() }) | ftxui::xflex |
+                       ftxui::size(ftxui::WIDTH, ftxui::GREATER_THAN, 40) | ftxui::border;
+        });
+
+        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::FitComponent();
         screen.Loop(component);
 }

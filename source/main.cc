@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
@@ -11,15 +13,22 @@ namespace details
 namespace constants
 {
 auto constexpr kMaxModule = 20;
+auto constexpr kDestDir = "dopy_release";
+auto constexpr kBinaryDir = "binary";
+auto constexpr kManifestDir = "manifest";
 } // namespace constants
 
 struct Module final {
         using Vec = std::vector<Module>;
 
-        std::string name;
-        std::string binary;
-        std::string manifest;
+        std::string display_name;
+        std::string path;
 };
+
+bool operator<(Module const& left, Module const& right)
+{
+        return left.path < right.path;
+}
 
 struct ManifestInfos final {
         std::string aos_a;
@@ -42,29 +51,40 @@ ManifestInfos ManifestDirectories(void)
         return ManifestInfos{ std::move(aos_a), std::move(aos_b) };
 }
 
-std::vector<std::string> ManifestsList()
+std::string GetTheName(std::filesystem::directory_entry const& item)
+{
+        return *std::prev(std::filesystem::path(item).end(), 1);
+}
+
+Module::Vec ManifestsList()
 {
         ManifestInfos const manifest_infos = ManifestDirectories();
         std::filesystem::directory_iterator const aos_a{ manifest_infos.aos_a };
         std::filesystem::directory_iterator const aos_b{ manifest_infos.aos_b };
-        std::vector<std::string> result;
+        Module::Vec result;
 
         result.reserve(constants::kMaxModule);
         for (auto const& dir : aos_a) {
                 if (dir.is_directory()) {
-                        result.emplace_back(dir.path());
+                        Module module;
+                        module.display_name = GetTheName(dir);
+                        module.path = dir.path();
+                        result.emplace_back(module);
                 }
         }
         for (auto const& dir : aos_b) {
                 if (dir.is_directory()) {
-                        result.emplace_back(dir.path());
+                        Module module;
+                        module.display_name = GetTheName(dir);
+                        module.path = dir.path();
+                        result.emplace_back(module);
                 }
         }
 
         return result;
 }
 
-std::vector<std::string> BinariesList()
+Module::Vec BinariesList()
 {
         using std::filesystem::directory_iterator;
         using std::filesystem::directory_entry;
@@ -73,7 +93,7 @@ std::vector<std::string> BinariesList()
         using std::filesystem::perms;
 
         directory_iterator const build_dir{ current_path() / "modules" };
-        std::vector<std::string> result;
+        Module::Vec result;
 
         auto IsExecutable = +[](directory_entry const& other) -> bool {
                 return other.is_regular_file() &&
@@ -85,7 +105,10 @@ std::vector<std::string> BinariesList()
                 if (dir.is_directory()) {
                         for (auto const& inner_dir : directory_iterator(dir)) {
                                 if (IsExecutable(inner_dir)) {
-                                        result.emplace_back(inner_dir.path());
+                                        Module module;
+                                        module.display_name = GetTheName(inner_dir);
+                                        module.path = inner_dir.path();
+                                        result.emplace_back(module);
                                 }
                         }
                 }
@@ -100,24 +123,31 @@ namespace cli
 {
 class FileList final : public ftxui::ComponentBase {
     public:
-        FileList(std::vector<std::string>&& file_list);
+        FileList(details::Module::Vec&& file_list);
+
+        std::map<details::Module, bool> const& list() const;
 
     private:
-        void configure(std::vector<std::string>&& file_list);
+        void configure(details::Module::Vec&& file_list);
         void generateView();
 
-        std::map<std::string, bool> list_;
+        std::map<details::Module, bool> list_;
 };
 
-FileList::FileList(std::vector<std::string>&& file_list)
+FileList::FileList(details::Module::Vec&& file_list)
 {
         configure(std::move(file_list));
         generateView();
 }
 
-void FileList::configure(std::vector<std::string>&& file_list)
+std::map<details::Module, bool> const& FileList::list() const
 {
-        for (std::string file : file_list) {
+        return list_;
+}
+
+void FileList::configure(details::Module::Vec&& file_list)
+{
+        for (details::Module file : file_list) {
                 list_[std::move(file)] = false;
         }
 }
@@ -126,8 +156,7 @@ void FileList::generateView()
         ftxui::Components components;
 
         for (auto& [key, value] : this->list_) {
-                std::string const filename = *std::prev(std::filesystem::path(key).end(), 1);
-                components.emplace_back(ftxui::Checkbox(filename, &value));
+                components.emplace_back(ftxui::Checkbox(key.display_name, &value));
         }
 
         this->ComponentBase::Add(ftxui::Container::Vertical(std::move(components)));
@@ -142,12 +171,38 @@ ftxui::Component BinariesWindow()
         return ftxui::Make<FileList>(details::BinariesList());
 }
 
+void CopyFiles(FileList const& file_list, std::string const& dest)
+{
+        using std::filesystem::exists;
+        using std::filesystem::create_directories;
+        using std::filesystem::remove_all;
+        using std::filesystem::copy_options;
+
+        if (exists(dest)) {
+                remove_all(dest);
+        }
+        create_directories(dest);
+
+        std::ofstream log("log.txt", std::ios::app);
+
+        for (auto const& [module, is_selected] : file_list.list()) {
+                log << module.path << " - " << std::boolalpha << is_selected << std::endl;
+                if (is_selected) {
+                        std::filesystem::copy(module.path, dest,
+                                              copy_options::recursive |
+                                                      copy_options::overwrite_existing);
+                }
+        }
+}
+
 } // namespace cli
 
 int main(void)
 {
         int width = 30;
         int height = 20;
+
+        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::FitComponent();
 
         ftxui::WindowOptions binaries_win_options;
         binaries_win_options.inner = cli::BinariesWindow();
@@ -163,7 +218,24 @@ int main(void)
 
         ftxui::Component manifests_window = ftxui::Window(manifests_win_options);
         ftxui::Component binaries_window = ftxui::Window(binaries_win_options);
-        ftxui::Component done_button = ftxui::Button("Done", [] { std::exit(EXIT_SUCCESS); });
+        ftxui::Component done_button = ftxui::Button("Done", [&] {
+                try {
+                        std::filesystem::path const dest =
+                                std::filesystem::current_path() / details::constants::kDestDir;
+                        cli::CopyFiles(
+                                *dynamic_cast<cli::FileList*>(binaries_win_options.inner.get()),
+                                dest / details::constants::kBinaryDir);
+                        cli::CopyFiles(
+                                *dynamic_cast<cli::FileList*>(manifests_win_options.inner.get()),
+                                dest / details::constants::kManifestDir);
+                } catch (std::exception& exception) {
+                        std::ofstream file("log2.txt");
+                        file << exception.what() << std::endl;
+                }
+
+                screen.ExitLoopClosure();
+                screen.Exit();
+        });
 
         ftxui::Component layout = ftxui::Container::Vertical({
                 ftxui::Container::Horizontal({
@@ -178,6 +250,5 @@ int main(void)
                        ftxui::size(ftxui::WIDTH, ftxui::GREATER_THAN, 40) | ftxui::border;
         });
 
-        ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::FitComponent();
         screen.Loop(component);
 }

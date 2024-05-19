@@ -1,5 +1,4 @@
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
@@ -183,10 +182,7 @@ void CopyFiles(FileList const& file_list, std::string const& dest)
         }
         create_directories(dest);
 
-        std::ofstream log("log.txt", std::ios::app);
-
         for (auto const& [module, is_selected] : file_list.list()) {
-                log << module.path << " - " << std::boolalpha << is_selected << std::endl;
                 if (is_selected) {
                         std::filesystem::copy(module.path, dest,
                                               copy_options::recursive |
@@ -216,6 +212,8 @@ int main(void)
         manifests_win_options.width = &width;
         manifests_win_options.height = &height;
 
+        std::string errors;
+
         ftxui::Component manifests_window = ftxui::Window(manifests_win_options);
         ftxui::Component binaries_window = ftxui::Window(binaries_win_options);
         ftxui::Component done_button = ftxui::Button("Done", [&] {
@@ -229,8 +227,7 @@ int main(void)
                                 *dynamic_cast<cli::FileList*>(manifests_win_options.inner.get()),
                                 dest / details::constants::kManifestDir);
                 } catch (std::exception& exception) {
-                        std::ofstream file("log2.txt");
-                        file << exception.what() << std::endl;
+                        errors = exception.what();
                 }
 
                 screen.ExitLoopClosure();
@@ -251,4 +248,7 @@ int main(void)
         });
 
         screen.Loop(component);
+
+        std::system("clear");
+        std::cerr << errors << std::endl;
 }
